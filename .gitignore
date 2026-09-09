@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*.local
+uploads/
+tmp/
+performance-results/
+*.log
+.DS_Store

@@ -1,0 +1,42 @@
+@base = http://localhost:8080/api/v1
+@csrf = replace-from-csrf-response
+@classId = replace
+@assessmentId = replace
+
+### Bootstrap anonymous CSRF and retain cookie in the client
+GET {{base}}/auth/csrf
+
+### Login (use CSRF from previous response)
+POST {{base}}/auth/login
+Content-Type: application/json
+X-CSRF-Token: {{csrf}}
+
+{"email":"student001@seed.invalid","password":"replace-test-secret"}
+
+### Scoped classes
+GET {{base}}/classes?page=1&pageSize=20
+
+### Read draft
+GET {{base}}/assessments/{{assessmentId}}/submission
+
+### Save changed draft
+PATCH {{base}}/assessments/{{assessmentId}}/submission
+Content-Type: application/json
+X-CSRF-Token: {{csrf}}
+
+{"expectedRevision":0,"textAnswer":"Bản nháp của tôi"}
+
+### Final submit, safe retry uses identical key and payload
+POST {{base}}/assessments/{{assessmentId}}/submission/submit
+Content-Type: application/json
+X-CSRF-Token: {{csrf}}
+Idempotency-Key: 2d82bf12-cfd7-4e39-9726-ccb18854b99a
+
+{"expectedRevision":1,"textAnswer":"Bài nộp cuối cùng"}
+
+### Permission denial example: another learner's guessed result is not an exposed route
+GET {{base}}/assessments/{{assessmentId}}/result
+
+### Protected material download with Range
+GET {{base}}/materials/replace-material-id/download
+Range: bytes=0-1023

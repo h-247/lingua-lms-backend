@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lingua_test
+      POSTGRES_PASSWORD: lingua_test_local_only
+      POSTGRES_DB: lingua_test
+    ports:
+      - "127.0.0.1:5435:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lingua_test -d lingua_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20

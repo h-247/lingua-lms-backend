@@ -1,0 +1,466 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ClassStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum GroupStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum Level {
+  PRE_A1
+  A1
+  A2
+  B1
+  B2
+  C1
+  C2
+}
+
+enum MaterialType {
+  FILE
+  LINK
+}
+
+enum MaterialVisibility {
+  STUDENTS
+  TEACHERS_ONLY
+}
+
+enum SkillTag {
+  READING
+  WRITING
+  LISTENING
+  SPEAKING
+  GRAMMAR
+  VOCABULARY
+}
+
+enum FileStatus {
+  UPLOADING
+  READY
+  FAILED
+}
+
+enum FileContext {
+  MATERIAL
+  HOMEWORK_ATTACHMENT
+}
+
+enum AssessmentKind {
+  HOMEWORK
+  GRADED_QUIZ
+  PRACTICE_QUIZ
+}
+
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum AssessmentAudience {
+  WHOLE_CLASS
+  SELECTED_GROUPS
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  TRUE_FALSE
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  GRADED
+}
+
+enum PracticeAttemptStatus {
+  DRAFT
+  GRADED
+}
+
+model User {
+  id                 String     @id @default(uuid()) @db.Uuid
+  email              String     @unique @db.VarChar(320)
+  displayName        String     @db.VarChar(120)
+  role               UserRole
+  status             UserStatus @default(ACTIVE)
+  passwordHash       String     @db.Text
+  mustChangePassword Boolean    @default(true)
+  authVersion        Int        @default(1)
+  createdAt          DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @db.Timestamptz(3)
+
+  taughtClasses      LearningClass[]       @relation("ClassTeacher")
+  enrollments        Enrollment[]
+  groupMemberships   GroupMembership[]
+  recipients         AssessmentRecipient[]
+  submissions        Submission[]
+  practiceAttempts   PracticeAttempt[]
+  uploadedFiles      FileAsset[]           @relation("FileUploader")
+  ownedFiles         FileAsset[]           @relation("FileOwnerStudent")
+  gradedSubmissions  Submission[]          @relation("SubmissionGrader")
+  auditEvents        AuditEvent[]          @relation("AuditActor")
+  createdAssessments Assessment[]          @relation("AssessmentCreator")
+}
+
+model UserSession {
+  sid    String   @id @db.VarChar
+  sess   Json
+  expire DateTime @db.Timestamp(6)
+
+  @@index([expire], map: "IDX_user_session_expire")
+  @@map("user_session")
+}
+
+model AuthAttemptLimit {
+  emailKey        String    @id @db.VarChar(320)
+  failedCount     Int       @default(0)
+  windowStartedAt DateTime  @default(now()) @db.Timestamptz(3)
+  blockedUntil    DateTime? @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+}
+
+model LearningClass {
+  id          String      @id @default(uuid()) @db.Uuid
+  code        String      @unique @db.VarChar(40)
+  name        String      @db.VarChar(160)
+  description String?     @db.VarChar(2000)
+  level       Level
+  teacherId   String      @db.Uuid
+  startDate   DateTime?   @db.Date
+  endDate     DateTime?   @db.Date
+  status      ClassStatus @default(DRAFT)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
+
+  teacher     User           @relation("ClassTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  enrollments Enrollment[]
+  groups      LearnerGroup[]
+  sections    Section[]
+  materials   Material[]
+  files       FileAsset[]
+  assessments Assessment[]
+  auditEvents AuditEvent[]
+
+  @@index([teacherId, status])
+  @@index([status, code])
+}
+
+model Enrollment {
+  id        String           @id @default(uuid()) @db.Uuid
+  classId   String           @db.Uuid
+  studentId String           @db.Uuid
+  status    EnrollmentStatus @default(ACTIVE)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime         @updatedAt @db.Timestamptz(3)
+
+  learningClass LearningClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  student       User          @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@unique([classId, studentId])
+  @@index([studentId, status])
+  @@index([classId, status])
+}
+
+model LearnerGroup {
+  id        String      @id @default(uuid()) @db.Uuid
+  classId   String      @db.Uuid
+  name      String      @db.VarChar(120)
+  nameKey   String      @db.VarChar(120)
+  purpose   String?     @db.VarChar(500)
+  status    GroupStatus @default(ACTIVE)
+  createdAt DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime    @updatedAt @db.Timestamptz(3)
+
+  learningClass    LearningClass     @relation(fields: [classId], references: [id], onDelete: Restrict)
+  memberships      GroupMembership[]
+  assessmentGroups AssessmentGroup[]
+
+  @@unique([classId, nameKey])
+  @@index([classId, status])
+}
+
+model GroupMembership {
+  id        String   @id @default(uuid()) @db.Uuid
+  groupId   String   @db.Uuid
+  studentId String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  group   LearnerGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  student User         @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, studentId])
+  @@index([studentId, groupId])
+}
+
+model Section {
+  id        String   @id @default(uuid()) @db.Uuid
+  classId   String   @db.Uuid
+  title     String   @db.VarChar(160)
+  position  Int
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  learningClass LearningClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  materials     Material[]
+
+  @@index([classId, position, id])
+}
+
+model FileAsset {
+  id             String      @id @default(uuid()) @db.Uuid
+  classId        String      @db.Uuid
+  uploaderId     String      @db.Uuid
+  ownerStudentId String?     @db.Uuid
+  context        FileContext
+  status         FileStatus  @default(UPLOADING)
+  storageKey     String      @unique @db.VarChar(255)
+  originalName   String      @db.VarChar(255)
+  mediaType      String      @db.VarChar(120)
+  byteCount      Int
+  sha256         String      @db.Char(64)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  readyAt        DateTime?   @db.Timestamptz(3)
+
+  learningClass LearningClass @relation(fields: [classId], references: [id], onDelete: Restrict)
+  uploader      User          @relation("FileUploader", fields: [uploaderId], references: [id], onDelete: Restrict)
+  ownerStudent  User?         @relation("FileOwnerStudent", fields: [ownerStudentId], references: [id], onDelete: Restrict)
+  material      Material?
+  submissions   Submission[]
+
+  @@index([classId, status, context])
+  @@index([ownerStudentId, context])
+}
+
+model Material {
+  id          String             @id @default(uuid()) @db.Uuid
+  classId     String             @db.Uuid
+  sectionId   String             @db.Uuid
+  title       String             @db.VarChar(160)
+  description String?            @db.VarChar(2000)
+  position    Int
+  type        MaterialType
+  visibility  MaterialVisibility
+  fileAssetId String?            @unique @db.Uuid
+  externalUrl String?            @db.VarChar(2048)
+  createdAt   DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime           @updatedAt @db.Timestamptz(3)
+
+  learningClass LearningClass        @relation(fields: [classId], references: [id], onDelete: Restrict)
+  section       Section              @relation(fields: [sectionId], references: [id], onDelete: Restrict)
+  fileAsset     FileAsset?           @relation(fields: [fileAssetId], references: [id], onDelete: Restrict)
+  skills        MaterialSkill[]
+  assessments   AssessmentMaterial[]
+
+  @@index([classId, sectionId, position, id])
+}
+
+model MaterialSkill {
+  materialId String   @db.Uuid
+  skill      SkillTag
+
+  material Material @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@id([materialId, skill])
+}
+
+model Assessment {
+  id           String             @id @default(uuid()) @db.Uuid
+  classId      String             @db.Uuid
+  createdById  String             @db.Uuid
+  kind         AssessmentKind
+  status       AssessmentStatus   @default(DRAFT)
+  audience     AssessmentAudience
+  title        String             @db.VarChar(160)
+  instructions String?            @db.VarChar(5000)
+  maxPoints    Decimal?           @db.Decimal(10, 2)
+  dueAt        DateTime?          @db.Timestamptz(3)
+  allowLate    Boolean            @default(false)
+  publishedAt  DateTime?          @db.Timestamptz(3)
+  closedAt     DateTime?          @db.Timestamptz(3)
+  createdAt    DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime           @updatedAt @db.Timestamptz(3)
+
+  learningClass    LearningClass         @relation(fields: [classId], references: [id], onDelete: Restrict)
+  createdBy        User                  @relation("AssessmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  groups           AssessmentGroup[]
+  recipients       AssessmentRecipient[]
+  materials        AssessmentMaterial[]
+  questions        AssessmentQuestion[]
+  submissions      Submission[]
+  practiceAttempts PracticeAttempt[]
+
+  @@index([classId, status, kind, createdAt])
+  @@index([dueAt, status])
+}
+
+model AssessmentGroup {
+  assessmentId String @db.Uuid
+  groupId      String @db.Uuid
+
+  assessment Assessment   @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  group      LearnerGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+
+  @@id([assessmentId, groupId])
+  @@index([groupId])
+}
+
+model AssessmentRecipient {
+  id           String   @id @default(uuid()) @db.Uuid
+  assessmentId String   @db.Uuid
+  studentId    String   @db.Uuid
+  assignedAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  student    User       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentId, studentId])
+  @@index([studentId, assessmentId])
+}
+
+model AssessmentMaterial {
+  assessmentId String @db.Uuid
+  materialId   String @db.Uuid
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  material   Material   @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@id([assessmentId, materialId])
+  @@index([materialId])
+}
+
+model AssessmentQuestion {
+  id           String       @id @default(uuid()) @db.Uuid
+  assessmentId String       @db.Uuid
+  type         QuestionType
+  prompt       String       @db.VarChar(2000)
+  explanation  String?      @db.VarChar(2000)
+  points       Decimal      @db.Decimal(10, 2)
+  position     Int
+
+  assessment Assessment       @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  options    QuestionOption[]
+
+  @@index([assessmentId, position, id])
+}
+
+model QuestionOption {
+  id         String  @id @default(uuid()) @db.Uuid
+  questionId String  @db.Uuid
+  text       String  @db.VarChar(1000)
+  isCorrect  Boolean @default(false)
+  position   Int
+
+  question AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@index([questionId, position, id])
+}
+
+model Submission {
+  id             String           @id @default(uuid()) @db.Uuid
+  receiptId      String?          @unique @db.Uuid
+  assessmentId   String           @db.Uuid
+  studentId      String           @db.Uuid
+  status         SubmissionStatus @default(DRAFT)
+  revision       Int              @default(0)
+  textAnswer     String?          @db.VarChar(20000)
+  answers        Json?
+  attachmentId   String?          @db.Uuid
+  payloadHash    String?          @db.Char(64)
+  idempotencyKey String?          @db.VarChar(120)
+  submittedAt    DateTime?        @db.Timestamptz(3)
+  isLate         Boolean?
+  earnedPoints   Decimal?         @db.Decimal(10, 2)
+  maxPoints      Decimal?         @db.Decimal(10, 2)
+  percentage     Decimal?         @db.Decimal(5, 2)
+  feedback       String?          @db.VarChar(5000)
+  gradedById     String?          @db.Uuid
+  gradedAt       DateTime?        @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(3)
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  student    User       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  attachment FileAsset? @relation(fields: [attachmentId], references: [id], onDelete: Restrict)
+  gradedBy   User?      @relation("SubmissionGrader", fields: [gradedById], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentId, studentId])
+  @@index([assessmentId, status, submittedAt])
+  @@index([studentId, status])
+  @@index([idempotencyKey])
+}
+
+model PracticeAttempt {
+  id             String                @id @default(uuid()) @db.Uuid
+  receiptId      String?               @unique @db.Uuid
+  assessmentId   String                @db.Uuid
+  studentId      String                @db.Uuid
+  attemptNumber  Int
+  status         PracticeAttemptStatus @default(DRAFT)
+  revision       Int                   @default(0)
+  answers        Json?
+  payloadHash    String?               @db.Char(64)
+  idempotencyKey String?               @db.VarChar(120)
+  earnedPoints   Decimal?              @db.Decimal(10, 2)
+  maxPoints      Decimal?              @db.Decimal(10, 2)
+  percentage     Decimal?              @db.Decimal(5, 2)
+  submittedAt    DateTime?             @db.Timestamptz(3)
+  createdAt      DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime              @updatedAt @db.Timestamptz(3)
+
+  assessment Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  student    User       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentId, studentId, attemptNumber])
+  @@index([assessmentId, studentId, status])
+  @@index([studentId, status, submittedAt])
+  @@index([idempotencyKey])
+}
+
+model AuditEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorId      String   @db.Uuid
+  classId      String?  @db.Uuid
+  action       String   @db.VarChar(100)
+  resourceType String   @db.VarChar(80)
+  resourceId   String   @db.VarChar(80)
+  reason       String?  @db.VarChar(500)
+  details      Json?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  actor         User           @relation("AuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+  learningClass LearningClass? @relation(fields: [classId], references: [id], onDelete: Restrict)
+
+  @@index([classId, createdAt, id])
+  @@index([actorId, createdAt])
+  @@index([resourceType, resourceId])
+}
